@@ -210,23 +210,23 @@ If you would like to change the value of `.autoAddReplicas` trigger, you need to
 .Example: Updating Trigger with wait for 5 seconds
 ----
 {
-  "set-trigger": {
-    "name": ".auto_add_replicas",
-    "event": "nodeLost,
-    "waitFor": "5s",
-    "enabled": true,
-    "actions": [
-      {
-        "name": "auto_add_replicas_plan",
-        "class": "solr.AutoAddReplicasPlanAction"
-      },
-      {
-       "name": "auto_add_replicas_plan",
-       "class": "solr.ExecutePlanAction"
-      }
-    ]
+    'set-trigger': {
+      'name': '.auto_add_replicas',
+      'event': 'nodeLost',
+      'waitFor': '5s',
+      'enabled': 'true',
+      'actions': [
+        {
+          'name': 'auto_add_replicas_plan',
+          'class': 'solr.AutoAddReplicasPlanAction'
+        },
+        {
+         'name': 'auto_add_replicas_plan',
+         'class': 'solr.ExecutePlanAction'
+        }
+      ]
+    }
   }
-}
 ----
 
 TIP: See <<format-of-solr-xml.adoc#the-solrcloud-element,The <solrcloud> Element>> for more details about how to work with `solr.xml`.
