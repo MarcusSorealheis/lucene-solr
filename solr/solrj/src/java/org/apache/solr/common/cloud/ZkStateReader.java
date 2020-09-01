@@ -41,8 +41,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static java.util.Collections.EMPTY_MAP;
-import static java.util.Collections.emptyMap;
-import static java.util.Collections.emptySet;
 import static java.util.Collections.emptySortedSet;
 import static org.apache.solr.common.util.Utils.fromJSON;
 import java.lang.invoke.MethodHandles;
@@ -57,7 +55,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Objects;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
@@ -206,7 +203,7 @@ public class ZkStateReader implements SolrCloseable {
 
   private Set<CloudCollectionsListener> cloudCollectionsListeners = ConcurrentHashMap.newKeySet();
 
-  private final ExecutorService notifications = ParWork.getEXEC();
+  private final ExecutorService notifications = ParWork.getRootSharedExecutor();
 
   private final Set<LiveNodesListener> liveNodesListeners = ConcurrentHashMap.newKeySet();
 
@@ -345,7 +342,12 @@ public class ZkStateReader implements SolrCloseable {
     this.configManager = new ZkConfigManager(zkClient);
     this.closeClient = true;
     this.securityNodeListener = null;
-    zkClient.start();
+    try {
+      zkClient.start();
+    } catch (RuntimeException re) {
+      zkClient.close(); // stuff has been opened inside the zkClient
+      throw re;
+    }
     assert ObjectReleaseTracker.track(this);
   }
 
@@ -486,8 +488,7 @@ public class ZkStateReader implements SolrCloseable {
         ParWork.propegateInterrupt(e);
       }
 
-      VersionedCollectionProps props = new VersionedCollectionProps(
-          stat.getVersion(), (Map<String,String>) fromJSON(data));
+      VersionedCollectionProps props = new VersionedCollectionProps(stat.getVersion(), (Map<String,String>) fromJSON(data));
       watchedCollectionProps.put(c, props);
     });
   }
@@ -967,7 +968,7 @@ public class ZkStateReader implements SolrCloseable {
     if (clusterState == null) {
       return null;
     }
-    final DocCollection docCollection = clusterState.getCollectionOrNull(collection, true);
+    final DocCollection docCollection = clusterState.getCollectionOrNull(collection);
     if (docCollection == null || docCollection.getSlicesMap() == null) {
       throw new ZooKeeperException(ErrorCode.BAD_REQUEST,
           "Could not find collection in zk: " + collection);
@@ -1134,8 +1135,7 @@ public class ZkStateReader implements SolrCloseable {
           try {
             byte[] data = zkClient.getData(getCollectionPropsPath(collection), propsWatcher, stat);
 
-            VersionedCollectionProps props = new VersionedCollectionProps(
-                stat.getVersion(), (Map<String,String>) fromJSON(data));
+            VersionedCollectionProps props = new VersionedCollectionProps(stat.getVersion(), (Map<String,String>) fromJSON(data));
             watchedCollectionProps.put(collection, props);
             properties = props;
           } catch (KeeperException e) {
@@ -1151,7 +1151,7 @@ public class ZkStateReader implements SolrCloseable {
     return properties.props;
   }
 
-  private class VersionedCollectionProps {
+  private static class VersionedCollectionProps {
     int zkVersion;
     Map<String, String> props;
     long cacheUntilNs = 0;
@@ -1324,8 +1324,7 @@ public class ZkStateReader implements SolrCloseable {
         try {
           byte[] data = zkClient.getData(getCollectionPropsPath(coll), this, stat);
 
-          VersionedCollectionProps props = new VersionedCollectionProps(
-              stat.getVersion(), (Map<String,String>) fromJSON(data));
+          VersionedCollectionProps props = new VersionedCollectionProps(stat.getVersion(), (Map<String,String>) fromJSON(data));
           watchedCollectionProps.put(coll, props);
 
           try (ParWork work = new ParWork(this, true)) {

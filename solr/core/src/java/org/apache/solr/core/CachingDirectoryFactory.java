@@ -30,10 +30,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.LockFactory;
 import org.apache.lucene.util.IOUtils;
+import org.apache.solr.common.AlreadyClosedException;
 import org.apache.solr.common.ParWork;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrException.ErrorCode;
@@ -168,7 +168,7 @@ public abstract class CachingDirectoryFactory extends DirectoryFactory {
       }
       cacheValue.doneWithDir = true;
       if (log.isDebugEnabled()) log.debug("Done with dir: {}", cacheValue);
-      if (cacheValue.refCnt == 0 && !closed) {
+      if (cacheValue.refCnt == 0) {
         boolean cl = closeCacheValue(cacheValue);
         if (cl) {
           removeFromCache(cacheValue);
@@ -193,10 +193,10 @@ public abstract class CachingDirectoryFactory extends DirectoryFactory {
     }
 
     synchronized (this) {
+      closed = true;
       if (log.isDebugEnabled()) log.debug("Closing {} - {} directories currently being tracked", this.getClass().getSimpleName(), byDirectoryCache.size());
       TimeOut timeout = new TimeOut(5, TimeUnit.SECONDS,  TimeSource.NANO_TIME); // nocommit sensible timeout control
-      this.closed = true;
-      Collection<CacheValue> values = byDirectoryCache.values();
+      Collection<CacheValue> values = new HashSet<>(byDirectoryCache.values());
       for (CacheValue val : values) {
         if (log.isDebugEnabled()) log.debug("Closing {} - currently tracking: {}",
                 this.getClass().getSimpleName(), val);
@@ -260,7 +260,7 @@ public abstract class CachingDirectoryFactory extends DirectoryFactory {
     }
   }
 
-  private void removeFromCache(CacheValue v) {
+  private synchronized void removeFromCache(CacheValue v) {
     if (log.isDebugEnabled()) {
       log.debug("removeFromCache(CacheValue v={}) - start", v);
     }
@@ -433,6 +433,10 @@ public abstract class CachingDirectoryFactory extends DirectoryFactory {
       log.debug("get(String path={}, DirContext dirContext={}, String rawLockType={}) - start", path, dirContext, rawLockType);
     }
 
+    if (closed) {
+      throw new AlreadyClosedException();
+    }
+
     String fullPath = normalize(path);
     synchronized (this) {
 
@@ -562,7 +566,7 @@ public abstract class CachingDirectoryFactory extends DirectoryFactory {
 
       assert cacheValue.refCnt >= 0 : cacheValue.refCnt;
 
-      if (cacheValue.refCnt == 0 && cacheValue.doneWithDir && !closed) {
+      if (cacheValue.refCnt == 0 && cacheValue.doneWithDir) {
         boolean cl = closeCacheValue(cacheValue);
         if (cl) {
           removeFromCache(cacheValue);

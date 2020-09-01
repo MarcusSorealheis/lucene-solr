@@ -32,11 +32,9 @@ import org.apache.solr.client.solrj.io.eval.IfThenElseEvaluator;
 import org.apache.solr.client.solrj.io.stream.expr.StreamFactory;
 import org.apache.solr.client.solrj.request.CollectionAdminRequest;
 import org.apache.solr.client.solrj.request.UpdateRequest;
-import org.apache.solr.cloud.AbstractDistribZkTestBase;
 import org.apache.solr.cloud.SolrCloudTestCase;
 import org.junit.Before;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Test;
 
 /**
@@ -47,11 +45,9 @@ import org.junit.Test;
 
 @Slow
 @LuceneTestCase.SuppressCodecs({"Lucene3x", "Lucene40","Lucene41","Lucene42","Lucene45"})
-@Ignore // nocommit flakey
 public class SelectWithEvaluatorsTest extends SolrCloudTestCase {
 
   private static final String COLLECTIONORALIAS = "collection1";
-  private static final int TIMEOUT = DEFAULT_TIMEOUT;
   private static final String id = "id";
 
   private static boolean useAlias;

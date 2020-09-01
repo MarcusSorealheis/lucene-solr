@@ -67,12 +67,10 @@ import org.junit.Test;
 @Slow
 @SolrTestCaseJ4.SuppressSSL
 @LuceneTestCase.SuppressCodecs({"Lucene3x", "Lucene40","Lucene41","Lucene42","Lucene45"})
-@Ignore // nocommit debug
 public class StreamExpressionTest extends SolrCloudTestCase {
 
   private static final String COLLECTIONORALIAS = "collection1";
   private static final String FILESTREAM_COLLECTION = "filestream_collection";
-  private static final int TIMEOUT = DEFAULT_TIMEOUT;
   private static final String id = "id";
 
   private static boolean useAlias;
@@ -302,6 +300,7 @@ public class StreamExpressionTest extends SolrCloudTestCase {
 
 
   @Test
+  @Nightly // slow
   public void testSqlStream() throws Exception {
 
     new UpdateRequest()
@@ -552,10 +551,9 @@ public class StreamExpressionTest extends SolrCloudTestCase {
       solrClientCache.close();
     }
   }
-
-
-
+  
   @Test
+  @Nightly // randomly slow
   public void testRandomStream() throws Exception {
 
     UpdateRequest update = new UpdateRequest();
@@ -1139,6 +1137,7 @@ public class StreamExpressionTest extends SolrCloudTestCase {
 
 
   @Test
+  @Nightly // slowish
   public void testFacetStream() throws Exception {
 
     new UpdateRequest()
@@ -2179,6 +2178,7 @@ public class StreamExpressionTest extends SolrCloudTestCase {
   }
 
   @Test
+  @Nightly // slow
   public void testTopicStream() throws Exception {
     Assume.assumeTrue(!useAlias);
 
@@ -2945,7 +2945,6 @@ public class StreamExpressionTest extends SolrCloudTestCase {
     return idToLabel;
   }
 
-
   @Test
   @Ignore // nocommit debug
   public void testBasicTextLogitStream() throws Exception {
@@ -3136,6 +3135,7 @@ public class StreamExpressionTest extends SolrCloudTestCase {
 
 
   @Test
+  @Nightly // this test creates a lot of data and is slow
   public void testSignificantTermsStream() throws Exception {
 
     UpdateRequest updateRequest = new UpdateRequest();

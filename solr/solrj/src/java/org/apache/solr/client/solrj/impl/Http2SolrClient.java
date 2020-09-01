@@ -44,6 +44,7 @@ import org.apache.solr.common.util.ContentStream;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.common.util.ObjectReleaseTracker;
 import org.apache.solr.common.util.SolrQueuedThreadPool;
+import org.apache.solr.common.util.SolrScheduledExecutorScheduler;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.HttpClientTransport;
 import org.eclipse.jetty.client.ProtocolHandlers;
@@ -69,6 +70,7 @@ import org.eclipse.jetty.http2.client.HTTP2Client;
 import org.eclipse.jetty.http2.client.http.HttpClientTransportOverHTTP2;
 import org.eclipse.jetty.util.Fields;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
+import org.eclipse.jetty.util.thread.ScheduledExecutorScheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -229,6 +231,7 @@ public class Http2SolrClient extends SolrClient {
 
     httpClient.setIdleTimeout(idleTimeout);
     try {
+      httpClient.setScheduler(new SolrScheduledExecutorScheduler("http2client-scheduler"));
       httpClient.setExecutor(httpClientExecutor);
       httpClient.setStrictEventOrdering(true);
       httpClient.setConnectBlocking(false);
@@ -252,25 +255,7 @@ public class Http2SolrClient extends SolrClient {
     asyncTracker.waitForComplete();
     if (closeClient) {
       try {
-        try (ParWork closer = new ParWork(this, false, true)) {
-          closer.collect("httpClient", () -> {
-                try {
-                  httpClient.stop();
-                } catch (InterruptedException e) {
-                  ParWork.propegateInterrupt(e);
-                } catch (Exception e) {
-                  log.error("Exception closing httpClient", e);
-                }
-              });
-
-          closer.collect("httpClientScheduler", () -> {
-            try {
-              httpClient.getScheduler().stop();
-            } catch (Exception e) {
-              ParWork.propegateInterrupt(e);
-            }
-          });
-        }
+        httpClient.stop();
       } catch (Exception e) {
         log.error("Exception closing httpClient", e);
       }
@@ -881,7 +866,7 @@ public class Http2SolrClient extends SolrClient {
     return serverBaseUrl;
   }
 
-  private class AsyncTracker {
+  private static class AsyncTracker {
 
     // nocommit - look at outstanding max again
     private static final int MAX_OUTSTANDING_REQUESTS = 30;

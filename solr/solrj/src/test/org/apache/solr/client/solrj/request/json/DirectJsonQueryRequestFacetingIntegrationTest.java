@@ -35,7 +35,8 @@ import org.junit.BeforeClass;
 import org.junit.Ignore;
 import org.junit.Test;
 
-@Ignore // nocommit - debug
+@Ignore // nocommit - somehow this test can hit zk session expiration issues that prevent the cores in the collection from being created
+// in cluster setup - which is strange ...
 public class DirectJsonQueryRequestFacetingIntegrationTest extends SolrCloudTestCase {
 
   private static final String COLLECTION_NAME = "techproducts";
@@ -54,9 +55,6 @@ public class DirectJsonQueryRequestFacetingIntegrationTest extends SolrCloudTest
     configureCluster(1)
         .addConfig(CONFIG_NAME, new File(ExternalPaths.TECHPRODUCTS_CONFIGSET).toPath())
         .configure();
-
-    final List<String> solrUrls = new ArrayList<>();
-    solrUrls.add(cluster.getJettySolrRunner(0).getBaseUrl().toString());
 
     CollectionAdminRequest.createCollection(COLLECTION_NAME, CONFIG_NAME, 1, 1).process(cluster.getSolrClient());
 

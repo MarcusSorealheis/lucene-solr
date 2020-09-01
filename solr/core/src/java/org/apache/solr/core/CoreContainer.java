@@ -40,11 +40,8 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
@@ -58,24 +55,19 @@ import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.store.Directory;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.cloud.SolrCloudManager;
-import org.apache.solr.client.solrj.embedded.EmbeddedSolrServer;
 import org.apache.solr.client.solrj.impl.CloudHttp2SolrClient;
-import org.apache.solr.client.solrj.impl.CloudSolrClient;
 import org.apache.solr.client.solrj.impl.HttpClientUtil;
 import org.apache.solr.client.solrj.impl.SolrHttpClientBuilder;
 import org.apache.solr.client.solrj.impl.SolrHttpClientContextBuilder;
-import org.apache.solr.client.solrj.impl.SolrHttpClientContextBuilder.AuthSchemeRegistryProvider;
-import org.apache.solr.client.solrj.impl.SolrHttpClientContextBuilder.CredentialsProviderProvider;
+import org.apache.solr.client.solrj.impl.XMLResponseParser;
 import org.apache.solr.client.solrj.io.SolrClientCache;
 import org.apache.solr.client.solrj.util.SolrIdentifierValidator;
 import org.apache.solr.cloud.CloudDescriptor;
-import org.apache.solr.cloud.Overseer;
 import org.apache.solr.cloud.ZkController;
 import org.apache.solr.cloud.autoscaling.AutoScalingHandler;
 import org.apache.solr.common.AlreadyClosedException;
 import org.apache.solr.common.ParWork;
-import org.apache.solr.common.ParWorkExecService;
-import org.apache.solr.common.ParWorkExecutor;
+import org.apache.solr.common.PerThreadExecService;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrException.ErrorCode;
 import org.apache.solr.common.cloud.DocCollection;
@@ -88,7 +80,6 @@ import org.apache.solr.common.util.ExecutorUtil;
 import org.apache.solr.common.util.IOUtils;
 import org.apache.solr.common.util.ObjectCache;
 import org.apache.solr.common.util.ObjectReleaseTracker;
-import org.apache.solr.common.util.SolrNamedThreadFactory;
 import org.apache.solr.common.util.Utils;
 import org.apache.solr.core.DirectoryFactory.DirContext;
 import org.apache.solr.core.backup.repository.BackupRepository;
@@ -111,10 +102,7 @@ import org.apache.solr.handler.admin.SecurityConfHandlerZk;
 import org.apache.solr.handler.admin.ZookeeperInfoHandler;
 import org.apache.solr.handler.admin.ZookeeperReadAPI;
 import org.apache.solr.handler.admin.ZookeeperStatusHandler;
-import org.apache.solr.handler.component.HttpShardHandler;
-import org.apache.solr.handler.component.HttpShardHandlerFactory;
 import org.apache.solr.handler.component.ShardHandlerFactory;
-import org.apache.solr.handler.loader.XMLLoader;
 import org.apache.solr.handler.sql.CalciteSolrDriver;
 import org.apache.solr.logging.LogWatcher;
 import org.apache.solr.logging.MDCLoggingContext;
@@ -139,7 +127,6 @@ import org.apache.solr.update.UpdateShardHandler;
 import org.apache.solr.common.util.OrderedExecutor;
 import org.apache.solr.util.RefCounted;
 import org.apache.zookeeper.KeeperException;
-import org.eclipse.jetty.util.BlockingArrayQueue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -167,7 +154,7 @@ public class CoreContainer implements Closeable {
 
   static {
     log.warn("expected pre init of xml factories {} {} {} {}", XmlConfigFile.xpathFactory,
-        FieldTypeXmlAdapter.dbf, XMLLoader.inputFactory, XMLLoader.saxFactory);
+        FieldTypeXmlAdapter.dbf, XMLResponseParser.inputFactory, XMLResponseParser.saxFactory);
   }
 
   final SolrCores solrCores = new SolrCores(this);
@@ -402,7 +389,7 @@ public class CoreContainer implements Closeable {
     containerProperties.putAll(cfg.getSolrProperties());
 
 
-    solrCoreLoadExecutor = new ParWorkExecService(ParWork.getEXEC(), Math.max(3, Runtime.getRuntime().availableProcessors() / 2));
+    solrCoreLoadExecutor = new PerThreadExecService(ParWork.getRootSharedExecutor(), Math.max(3, Runtime.getRuntime().availableProcessors() / 2));
 //    if (solrCoreLoadExecutor == null) {
 //      synchronized (CoreContainer.class) {
 //        if (solrCoreLoadExecutor == null) {
@@ -728,7 +715,7 @@ public class CoreContainer implements Closeable {
     containerHandlers.getApiBag().registerObject(packageStoreAPI.readAPI);
     containerHandlers.getApiBag().registerObject(packageStoreAPI.writeAPI);
 
-    solrClientCache = new SolrClientCache(updateShardHandler.getUpdateOnlyHttpClient());
+    solrClientCache = new SolrClientCache(updateShardHandler.getTheSharedHttpClient());
 
     // initialize CalciteSolrDriver instance to use this solrClientCache
     CalciteSolrDriver.INSTANCE.setSolrClientCache(solrClientCache);
@@ -970,7 +957,7 @@ public class CoreContainer implements Closeable {
       name = getZkController().getNodeName();
       cloudManager = getZkController().getSolrCloudManager();
       client = new CloudHttp2SolrClient.Builder(getZkController().getZkStateReader())
-          .withHttpClient(updateShardHandler.getUpdateOnlyHttpClient()).build();
+          .withHttpClient(updateShardHandler.getTheSharedHttpClient()).build();
     } else {
       name = getNodeConfig().getNodeName();
       if (name == null || name.isEmpty()) {

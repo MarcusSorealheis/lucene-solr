@@ -29,6 +29,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.http.HttpHeaders;
 import org.apache.lucene.util.Version;
 import org.apache.solr.api.V2HttpCall;
+import org.apache.solr.client.solrj.impl.XMLResponseParser;
 import org.apache.solr.common.ParWork;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrException.ErrorCode;
@@ -44,10 +45,8 @@ import org.apache.solr.core.SolrInfoBean;
 import org.apache.solr.core.SolrPaths;
 import org.apache.solr.core.SolrXmlConfig;
 import org.apache.solr.core.XmlConfigFile;
-import org.apache.solr.handler.loader.XMLLoader;
 import org.apache.solr.metrics.AltBufferPoolMetricSet;
 import org.apache.solr.metrics.MetricsMap;
-import org.apache.solr.metrics.OperatingSystemMetricSet;
 import org.apache.solr.metrics.SolrMetricManager;
 import org.apache.solr.metrics.SolrMetricProducer;
 import org.apache.solr.rest.schema.FieldTypeXmlAdapter;
@@ -91,10 +90,7 @@ import java.util.Arrays;
 import java.util.Locale;
 import java.util.Properties;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
@@ -110,7 +106,7 @@ public class SolrDispatchFilter extends BaseSolrFilter {
 
   static {
     log.warn("expected pre init of xml factories {} {} {} {}", XmlConfigFile.xpathFactory,
-        FieldTypeXmlAdapter.dbf, XMLLoader.inputFactory, XMLLoader.saxFactory);
+        FieldTypeXmlAdapter.dbf, XMLResponseParser.inputFactory, XMLResponseParser.saxFactory);
   }
 
   protected volatile CoreContainer cores;
@@ -218,7 +214,7 @@ public class SolrDispatchFilter extends BaseSolrFilter {
     }finally{
       log.trace("SolrDispatchFilter.init() done");
       if (cores != null) {
-        this.httpClient = cores.getUpdateShardHandler().getUpdateOnlyHttpClient().getHttpClient();
+        this.httpClient = cores.getUpdateShardHandler().getTheSharedHttpClient().getHttpClient();
       }
       init.countDown();
     }
@@ -294,11 +290,11 @@ public class SolrDispatchFilter extends BaseSolrFilter {
   protected synchronized CoreContainer createCoreContainer(Path solrHome, Properties extraProperties) {
     String zkHost = System.getProperty("zkHost");
     if (!StringUtils.isEmpty(zkHost)) {
-      int startUpZkTimeOut = Integer.getInteger("waitForZk", 30); // nocommit - zk settings
+      int zkClientTimeout = Integer.getInteger("zkConnectTimeout", 30000); // nocommit - must come from zk settings, we should parse more here and set this up vs waiting for zkController
       if (zkClient != null) {
         throw new IllegalStateException();
       }
-      zkClient = new SolrZkClient(zkHost, (int) TimeUnit.SECONDS.toMillis(startUpZkTimeOut));
+      zkClient = new SolrZkClient(zkHost, zkClientTimeout);
       zkClient.enableCloseLock();
       zkClient.start();
     }
@@ -653,21 +649,9 @@ public class SolrDispatchFilter extends BaseSolrFilter {
   public static HttpServletRequest closeShield(HttpServletRequest request, boolean retry) {
     if (!retry) {
       return new HttpServletRequestWrapper(request) {
-
         @Override
         public ServletInputStream getInputStream() throws IOException {
-
-          return new ServletInputStreamWrapper(super.getInputStream()) {
-            @Override
-            public void close() {
-              // even though we skip closes, we let local tests know not to close so that a full understanding can take
-              // place
-              assert Thread.currentThread().getStackTrace()[2].getClassName().matches(
-                  "org\\.apache\\.(?:solr|lucene).*") ? false : true : CLOSE_STREAM_MSG;
-              this.stream = ClosedServletInputStream.CLOSED_SERVLET_INPUT_STREAM;
-            }
-          };
-
+          return new CloseShieldServletInputStreamWrapper(request.getInputStream());
         }
       };
     } else {
@@ -688,23 +672,9 @@ public class SolrDispatchFilter extends BaseSolrFilter {
   public static HttpServletResponse closeShield(HttpServletResponse response, boolean retry) {
     if (!retry) {
       return new HttpServletResponseWrapper(response) {
-
         @Override
         public ServletOutputStream getOutputStream() throws IOException {
-
-          return new ServletOutputStreamWrapper(super.getOutputStream()) {
-            @Override
-            public void close() {
-              // even though we skip closes, we let local tests know not to close so that a full understanding can take
-              // place
-              assert Thread.currentThread().getStackTrace()[2].getClassName().matches(
-                  "org\\.apache\\.(?:solr|lucene).*") ? false
-                      : true : CLOSE_STREAM_MSG;
-              stream = ClosedServletOutputStream.CLOSED_SERVLET_OUTPUT_STREAM;
-            }
-          };
-
-
+          return new CloseShieldServletOutputStreamWrapper(response.getOutputStream());
         }
 
         @Override
@@ -713,7 +683,6 @@ public class SolrDispatchFilter extends BaseSolrFilter {
           response.getWriter().write(msg);
         }
 
-
         @Override
         public void sendError(int sc) throws IOException {
           sendError(sc, "Solr ran into an unexpected problem and doesn't seem to know more about it. There may be more information in the Solr logs.");
@@ -721,6 +690,37 @@ public class SolrDispatchFilter extends BaseSolrFilter {
       };
     } else {
       return response;
+    }
+  }
+
+  private static class CloseShieldServletInputStreamWrapper extends ServletInputStreamWrapper {
+    public CloseShieldServletInputStreamWrapper(ServletInputStream stream) throws IOException {
+      super(stream);
+    }
+
+    @Override
+    public void close() {
+      // even though we skip closes, we let local tests know not to close so that a full understanding can take
+      // place
+      assert Thread.currentThread().getStackTrace()[2].getClassName().matches(
+          "org\\.apache\\.(?:solr|lucene).*") ? false : true : CLOSE_STREAM_MSG;
+      this.stream = ClosedServletInputStream.CLOSED_SERVLET_INPUT_STREAM;
+    }
+  }
+
+  private static class CloseShieldServletOutputStreamWrapper extends ServletOutputStreamWrapper {
+    public CloseShieldServletOutputStreamWrapper(ServletOutputStream stream) {
+      super(stream);
+    }
+
+    @Override
+    public void close() {
+      // even though we skip closes, we let local tests know not to close so that a full understanding can take
+      // place
+      assert Thread.currentThread().getStackTrace()[2].getClassName().matches(
+          "org\\.apache\\.(?:solr|lucene).*") ? false
+              : true : CLOSE_STREAM_MSG;
+      stream = ClosedServletOutputStream.CLOSED_SERVLET_OUTPUT_STREAM;
     }
   }
 }

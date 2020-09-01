@@ -38,8 +38,6 @@ import com.carrotsearch.randomizedtesting.RandomizedContext;
 import com.carrotsearch.randomizedtesting.RandomizedTest;
 import com.carrotsearch.randomizedtesting.annotations.ThreadLeakFilters;
 import com.carrotsearch.randomizedtesting.annotations.ThreadLeakLingering;
-import com.carrotsearch.randomizedtesting.generators.RandomPicks;
-import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.codecs.lucene50.Lucene50StoredFieldsFormat;
 import org.apache.lucene.codecs.lucene86.Lucene86Codec;
 import org.apache.lucene.util.Constants;
@@ -49,20 +47,14 @@ import org.apache.solr.client.solrj.impl.Http2SolrClient;
 import org.apache.solr.client.solrj.impl.HttpClientUtil;
 import org.apache.solr.cloud.autoscaling.ScheduledTriggers;
 import org.apache.solr.common.ParWork;
-import org.apache.solr.common.ParWorkExecService;
-import org.apache.solr.common.ParWorkExecutor;
+import org.apache.solr.common.PerThreadExecService;
 import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrDocumentList;
 import org.apache.solr.common.TimeTracker;
 import org.apache.solr.common.params.ModifiableSolrParams;
-import org.apache.solr.common.util.ExecutorUtil;
 import org.apache.solr.common.util.ObjectReleaseTracker;
 import org.apache.solr.common.util.SolrQueuedThreadPool;
 import org.apache.solr.common.util.SysStats;
-import org.apache.solr.core.CoreContainer;
-import org.apache.solr.core.SolrXmlConfig;
-import org.apache.solr.core.XmlConfigFile;
-import org.apache.solr.rest.schema.FieldTypeXmlAdapter;
 import org.apache.solr.servlet.SolrDispatchFilter;
 import org.apache.solr.util.ExternalPaths;
 import org.apache.solr.util.RandomizeSSL;
@@ -83,8 +75,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.carrotsearch.randomizedtesting.rules.SystemPropertiesRestoreRule;
-
-import static com.carrotsearch.randomizedtesting.RandomizedTest.systemPropertyAsBoolean;
 
 /**
  * All Solr test cases should derive from this class eventually. This is originally a result of async logging, see:
@@ -134,17 +124,7 @@ public class SolrTestCase extends LuceneTestCase {
 
   @Rule
   public TestRule solrTestRules =
-          RuleChain.outerRule(new SystemPropertiesRestoreRule()).around(
-                  new TestWatcher() {
-                    @Override
-                    protected void failed(Throwable e, Description description) {
-                      failed = true;
-                    }
-
-                    @Override
-                    protected void succeeded(Description description) {
-                    }
-                  });
+          RuleChain.outerRule(new SystemPropertiesRestoreRule()).around(new SolrTestWatcher());
 
   /**
    * Annotation for test classes that want to disable SSL
@@ -219,8 +199,8 @@ public class SolrTestCase extends LuceneTestCase {
     testStartTime = System.nanoTime();
 
 
-    testExecutor = ParWork.getExecutor();
-    ((ParWorkExecService) testExecutor).closeLock(true);
+    testExecutor = ParWork.getMyPerThreadExecutor();
+    ((PerThreadExecService) testExecutor).closeLock(true);
     // stop zkserver threads that can linger
     //interruptThreadsOnTearDown("nioEventLoopGroup", false);
 
@@ -253,7 +233,7 @@ public class SolrTestCase extends LuceneTestCase {
       Lucene86Codec codec = new Lucene86Codec(Lucene50StoredFieldsFormat.Mode.BEST_SPEED);
       //Codec.setDefault(codec);
       System.setProperty("solr.lbclient.live_check_interval", "3000");
-      System.setProperty("solr.httpShardHandler.completionTimeout", "3000");
+      System.setProperty("solr.httpShardHandler.completionTimeout", "10000");
       System.setProperty("zookeeper.request.timeout", "15000");
       System.setProperty(SolrTestCaseJ4.USE_NUMERIC_POINTS_SYSPROP, "false");
       System.setProperty("solr.tests.IntegerFieldType", "org.apache.solr.schema.TrieIntField");
@@ -298,7 +278,7 @@ public class SolrTestCase extends LuceneTestCase {
       System.setProperty("solr.defaultCollectionActiveWait", "10");
 
       System.setProperty("solr.http2solrclient.maxpool.size", "6");
-      System.setProperty("solr.http2solrclient.pool.keepalive", "5000");
+      System.setProperty("solr.http2solrclient.pool.keepalive", "1500");
 
       System.setProperty("solr.disablePublicKeyHandler", "false");
       System.setProperty("solr.dependentupdate.timeout", "1"); // seconds
@@ -319,7 +299,7 @@ public class SolrTestCase extends LuceneTestCase {
 
       System.setProperty("solr.tests.ramBufferSizeMB", "100");
 
-      System.setProperty("solr.http2solrclient.default.idletimeout", "10000");
+      System.setProperty("solr.http2solrclient.default.idletimeout", "15000");
       System.setProperty("distribUpdateSoTimeout", "10000");
       System.setProperty("socketTimeout", "15000");
       System.setProperty("connTimeout", "10000");
@@ -335,7 +315,7 @@ public class SolrTestCase extends LuceneTestCase {
 
       System.setProperty("prepRecoveryReadTimeoutExtraWait", "100");
       System.setProperty("validateAfterInactivity", "-1");
-      System.setProperty("leaderVoteWait", "5000"); // this is also apparently controlling how long we wait for a leader on register nocommit
+      System.setProperty("leaderVoteWait", "2500"); // this is also apparently controlling how long we wait for a leader on register nocommit
       System.setProperty("leaderConflictResolveWait", "10000");
 
       System.setProperty("solr.recovery.recoveryThrottle", "500");
@@ -609,16 +589,17 @@ public class SolrTestCase extends LuceneTestCase {
 
   private static void interrupt(Thread thread, String nameContains) {
     if ((nameContains != null && thread.getName().contains(nameContains)) || (interuptThreadWithNameContains != null && thread.getName().contains(interuptThreadWithNameContains)) ) {
-      if (thread.getState() == Thread.State.TERMINATED || thread.getState() == Thread.State.WAITING) {
-        System.out.println("interrupt on " + thread.getName());
+      if (thread.getState() == Thread.State.TERMINATED || thread.getState() == Thread.State.WAITING || thread.getState() == Thread.State.BLOCKED || thread.getState() == Thread.State.RUNNABLE) { // adding RUNNABLE, BLOCKED, WAITING is not ideal, but we can be in
+        // processWorkerExit in this state - ideally we would check also we are in an exit or terminate method if !TERMINATED
+        log.warn("interrupt on " + thread.getName());
         thread.interrupt();
         try {
-          thread.join(100);
+          thread.join(250);
         } catch (InterruptedException e) {
           ParWork.propegateInterrupt(e);
         }
       } else {
-        System.out.println("state:" + thread.getState());
+        log.info("skipping interrupt due to state:" + thread.getState());
       }
     }
   }
@@ -770,6 +751,17 @@ public class SolrTestCase extends LuceneTestCase {
         }
       }
       return true;
+    }
+  }
+
+  private static class SolrTestWatcher extends TestWatcher {
+    @Override
+    protected void failed(Throwable e, Description description) {
+      failed = true;
+    }
+
+    @Override
+    protected void succeeded(Description description) {
     }
   }
 }

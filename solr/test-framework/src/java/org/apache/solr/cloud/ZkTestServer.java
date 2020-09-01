@@ -410,7 +410,7 @@ public class ZkTestServer implements Closeable {
             cnxnFactory.shutdown();
 
             cnxnFactory.join();
-
+            // NOT IDEAL, BUT THIS CAN SLEEP A BIT BEFORE EXIT
             ((Thread)zkServer.zooKeeperServer.getSessionTracker()).interrupt();
             ((Thread)zkServer.zooKeeperServer.getSessionTracker()).join();
             return cnxnFactory;

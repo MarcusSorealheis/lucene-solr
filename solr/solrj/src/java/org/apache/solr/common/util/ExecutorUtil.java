@@ -79,14 +79,18 @@ public class ExecutorUtil {
 
   public static void awaitTermination(ExecutorService pool) {
     boolean shutdown = false;
-
+    // if interrupted, we still wait a short time for thread stoppage, but then quickly bail
+    TimeOut interruptTimeout = new TimeOut(1000, TimeUnit.MILLISECONDS, TimeSource.NANO_TIME);
     boolean interrupted = false;
     do {
       try {
         // Wait a while for existing tasks to terminate
-        shutdown = pool.awaitTermination(60, TimeUnit.SECONDS);
+        shutdown = pool.awaitTermination(30, TimeUnit.SECONDS);
       } catch (InterruptedException ie) {
         interrupted = true;
+        if (interruptTimeout.hasTimedOut()) {
+          break;
+        }
       }
     } while (shutdown == false);
 

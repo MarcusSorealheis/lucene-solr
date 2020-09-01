@@ -453,7 +453,7 @@ public class ZkController implements Closeable {
               ParWork.close(overseerElector.getContext());
             }
             LeaderElector overseerElector = new LeaderElector(zkClient, new ContextKey("overseer", "overseer"), overseerContexts);
-            ZkController.this.overseer = new Overseer((HttpShardHandler) ((HttpShardHandlerFactory) cc.getShardHandlerFactory()).getShardHandler(cc.getUpdateShardHandler().getUpdateOnlyHttpClient()), cc.getUpdateShardHandler(),
+            ZkController.this.overseer = new Overseer((HttpShardHandler) ((HttpShardHandlerFactory) cc.getShardHandlerFactory()).getShardHandler(cc.getUpdateShardHandler().getTheSharedHttpClient()), cc.getUpdateShardHandler(),
                     CommonParams.CORES_HANDLER_PATH, zkStateReader, ZkController.this, cloudConfig);
             overseerElector.setup(context);
             overseerElector.joinElection(context, true);
@@ -637,7 +637,7 @@ public class ZkController implements Closeable {
   public void giveupLeadership(CoreDescriptor cd, Throwable tragicException) {
     assert tragicException != null;
     assert cd != null;
-    DocCollection dc = getClusterState().getCollectionOrNull(cd.getCollectionName(), true);
+    DocCollection dc = getClusterState().getCollectionOrNull(cd.getCollectionName());
     if (dc == null) return;
 
     Slice shard = dc.getSlice(cd.getCloudDescriptor().getShardId());
@@ -711,7 +711,7 @@ public class ZkController implements Closeable {
         return cloudManager;
       }
       cloudSolrClient = new CloudHttp2SolrClient.Builder(zkStateReader)
-          .withHttpClient(cc.getUpdateShardHandler().getUpdateOnlyHttpClient())
+          .withHttpClient(cc.getUpdateShardHandler().getTheSharedHttpClient())
           .build();
       cloudManager = new SolrClientCloudManager(
           new ZkDistributedQueueFactory(zkClient),
@@ -1081,7 +1081,7 @@ public class ZkController implements Closeable {
 
         zkStateReader.createClusterStateWatchersAndUpdate();
 
-        this.overseer = new Overseer((HttpShardHandler) ((HttpShardHandlerFactory) cc.getShardHandlerFactory()).getShardHandler(cc.getUpdateShardHandler().getUpdateOnlyHttpClient()), cc.getUpdateShardHandler(),
+        this.overseer = new Overseer((HttpShardHandler) ((HttpShardHandlerFactory) cc.getShardHandlerFactory()).getShardHandler(cc.getUpdateShardHandler().getTheSharedHttpClient()), cc.getUpdateShardHandler(),
                 CommonParams.CORES_HANDLER_PATH, zkStateReader, this, cloudConfig);
         this.overseerRunningMap = Overseer.getRunningMap(zkClient);
         this.overseerCompletedMap = Overseer.getCompletedMap(zkClient);
@@ -1591,10 +1591,6 @@ public class ZkController implements Closeable {
         throw e;
       }
 
-      // the watcher is added to a set so multiple calls of this method will left only one watcher
-      zkStateReader.registerCore(cloudDesc.getCollectionName());
-      zkStateReader.registerDocCollectionWatcher(cloudDesc.getCollectionName(),
-          new UnloadCoreOnDeletedWatcher(coreZkNodeName, shardId, desc.getName()));
       return shardId;
     } finally {
       MDCLoggingContext.clear();
@@ -2096,6 +2092,9 @@ public class ZkController implements Closeable {
 
   public void preRegister(CoreDescriptor cd, boolean publishState) {
     log.info("PreRegister SolrCore, collection={}, shard={} coreNodeName={}", cd.getCloudDescriptor().getCollectionName(), cd.getCloudDescriptor().getShardId());
+
+    CloudDescriptor cloudDesc = cd.getCloudDescriptor();
+
     String coreNodeName = getCoreNodeName(cd);
 
     // before becoming available, make sure we are not live and active
@@ -2103,13 +2102,18 @@ public class ZkController implements Closeable {
     try {
       checkStateInZk(cd);
 
-      CloudDescriptor cloudDesc = cd.getCloudDescriptor();
-
       // make sure the node name is set on the descriptor
       if (cloudDesc.getCoreNodeName() == null) {
         cloudDesc.setCoreNodeName(coreNodeName);
       }
       log.info("PreRegister found coreNodename of {}", coreNodeName);
+      
+      // the watcher is added to a set so multiple calls of this method will left only one watcher
+      zkStateReader.registerCore(cloudDesc.getCollectionName());
+      // the watcher is added to a set so multiple calls of this method will left only one watcher
+      zkStateReader.registerDocCollectionWatcher(cloudDesc.getCollectionName(),
+          new UnloadCoreOnDeletedWatcher(coreNodeName, cloudDesc.getShardId(), cd.getName()));
+
       // publishState == false on startup
       if (isPublishAsDownOnStartup(cloudDesc)) {
         publish(cd, Replica.State.DOWN, false, true);
@@ -2500,8 +2504,7 @@ public class ZkController implements Closeable {
   public void addOnReconnectListener(OnReconnect listener) {
     if (listener != null) {
        reconnectListeners.add(listener);
-       log.debug("Added new OnReconnect listener {}", listener);
-
+       if (log.isDebugEnabled()) log.debug("Added new OnReconnect listener {}", listener);
     }
   }
 
@@ -2510,12 +2513,10 @@ public class ZkController implements Closeable {
    */
   public void removeOnReconnectListener(OnReconnect listener) {
     if (listener != null) {
-      boolean wasRemoved;
-      synchronized (reconnectListeners) {
-        wasRemoved = reconnectListeners.remove(listener);
-      }
+      boolean wasRemoved = reconnectListeners.remove(listener);
+
       if (wasRemoved) {
-        log.debug("Removed OnReconnect listener {}", listener);
+        if (log.isDebugEnabled()) log.debug("Removed OnReconnect listener {}", listener);
       } else {
         log.warn("Was asked to remove OnReconnect listener {}, but remove operation " +
                 "did not find it in the list of registered listeners."
@@ -2525,8 +2526,7 @@ public class ZkController implements Closeable {
   }
 
   Set<OnReconnect> getCurrentOnReconnectListeners() {
-    Set<OnReconnect> clonedListeners = new HashSet<>(reconnectListeners);
-    return clonedListeners;
+    return Collections.unmodifiableSet(reconnectListeners);
   }
 
   /**

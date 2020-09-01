@@ -194,7 +194,7 @@ public class CreateCollectionCmd implements OverseerCollectionMessageHandler.Cmd
       ocmh.zkStateReader.waitForState(collectionName, 10, TimeUnit.SECONDS, (n, c) -> c != null);
 
       // refresh cluster state
-      clusterState = ocmh.cloudManager.getClusterStateProvider().getClusterState();
+      clusterState = ocmh.zkStateReader.getClusterState();
 
       List<ReplicaPosition> replicaPositions = null;
 //      try {
@@ -236,7 +236,7 @@ public class CreateCollectionCmd implements OverseerCollectionMessageHandler.Cmd
             collectionName, shardNames, message));
       }
       Map<String,ShardRequest> coresToCreate = new LinkedHashMap<>();
-      ShardHandler shardHandler = ocmh.shardHandlerFactory.getShardHandler(ocmh.overseer.getCoreContainer().getUpdateShardHandler().getUpdateOnlyHttpClient());
+      ShardHandler shardHandler = ocmh.shardHandlerFactory.getShardHandler(ocmh.overseer.getCoreContainer().getUpdateShardHandler().getTheSharedHttpClient());
       for (ReplicaPosition replicaPosition : replicaPositions) {
         String nodeName = replicaPosition.node;
 
@@ -376,7 +376,6 @@ public class CreateCollectionCmd implements OverseerCollectionMessageHandler.Cmd
         if (async != null) {
           zkStateReader.waitForState(collectionName, 30, TimeUnit.SECONDS, BaseCloudSolrClient.expectedShardsAndActiveReplicas(shardNames.size(), replicaPositions.size()));
         }
-
       }
 
       // modify the `withCollection` and store this new collection's name with it
@@ -404,10 +403,10 @@ public class CreateCollectionCmd implements OverseerCollectionMessageHandler.Cmd
       ParWork.propegateInterrupt(ex);
       throw ex;
     } catch (SolrException ex) {
-      log.error("Exception creating collections zk node", ex);
+      log.error("Exception creating collections", ex);
       throw ex;
     } catch (Exception ex) {
-      log.error("Exception creating collections zk node", ex);
+      log.error("Exception creating collection", ex);
       throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, null, ex);
     } finally {
       if (sessionWrapper.get() != null) sessionWrapper.get().release();

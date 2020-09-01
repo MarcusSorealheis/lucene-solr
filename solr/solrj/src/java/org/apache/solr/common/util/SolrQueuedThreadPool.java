@@ -89,7 +89,7 @@ public class SolrQueuedThreadPool extends ContainerLifeCycle implements ThreadFa
 
     public SolrQueuedThreadPool(String name) {
         this(Integer.MAX_VALUE, 12,
-                60000, 0,
+                60000, 0, // no reserved executor threads - we can process requests after shutdown or some race - we try to limit without threadpool limits no anyway
                 null, null,
                 new  SolrNamedThreadFactory(name));
         this.name = name;
@@ -672,7 +672,7 @@ public class SolrQueuedThreadPool extends ContainerLifeCycle implements ThreadFa
         try
         {
             Thread thread = _threadFactory.newThread(_runnable);
-            ParWork.getEXEC().execute(thread);
+            ParWork.getRootSharedExecutor().execute(thread);
             if (LOG.isDebugEnabled())
                 LOG.debug("Starting {}", thread);
             _threads.add(thread);
@@ -1031,7 +1031,13 @@ public class SolrQueuedThreadPool extends ContainerLifeCycle implements ThreadFa
 
                 // There is a chance that we shrunk just as a job was queued for us, so
                 // check again if we have sufficient threads to meet demand
-                ensureThreads();
+                if (!closed) {
+                    try {
+                        ensureThreads();
+                    } catch (RejectedExecutionException e) {
+                        log.info("RejectedExecutionException encountered");
+                    }
+                }
             }
         }
     }

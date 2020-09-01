@@ -80,6 +80,7 @@ import org.apache.solr.client.solrj.impl.BinaryResponseParser;
 import org.apache.solr.cloud.CloudDescriptor;
 import org.apache.solr.cloud.RecoveryStrategy;
 import org.apache.solr.cloud.ZkSolrResourceLoader;
+import org.apache.solr.common.AlreadyClosedException;
 import org.apache.solr.common.ParWork;
 import org.apache.solr.common.ParWorkExecutor;
 import org.apache.solr.common.SolrException;
@@ -1051,7 +1052,7 @@ public final class SolrCore implements SolrInfoBean, Closeable {
       initSearcher(prev);
 
       // Initialize the RestManager
-      restManager = initRestManager();
+      restManager = initRestManager(cd);
 
       // at this point we can load jars loaded from remote urls.
       memClassLoader.loadRemoteJars();
@@ -1148,7 +1149,7 @@ public final class SolrCore implements SolrInfoBean, Closeable {
 
       // ZK pre-register would have already happened so we read slice properties now
       final ClusterState clusterState = coreContainer.getZkController().getClusterState();
-      final DocCollection collection = clusterState.getCollectionOrNull(coreDescriptor.getCloudDescriptor().getCollectionName(), true);
+      final DocCollection collection = clusterState.getCollectionOrNull(coreDescriptor.getCloudDescriptor().getCollectionName());
       final Slice slice = collection.getSlice(coreDescriptor.getCloudDescriptor().getShardId());
       if (slice.getState() == Slice.State.CONSTRUCTION) {
         // set update log to buffer before publishing the core
@@ -2265,6 +2266,9 @@ public final class SolrCore implements SolrInfoBean, Closeable {
    * @param updateHandlerReopens if true, the UpdateHandler will be used when reopening a {@link SolrIndexSearcher}.
    */
   public RefCounted<SolrIndexSearcher> getSearcher(boolean forceNew, boolean returnSearcher, @SuppressWarnings({"rawtypes"})final Future[] waitSearcher, boolean updateHandlerReopens) {
+    if (isClosed) {
+      throw new AlreadyClosedException();
+    }
     // it may take some time to open an index.... we may need to make
     // sure that two threads aren't trying to open one at the same time
     // if it isn't necessary.
@@ -2975,9 +2979,10 @@ public final class SolrCore implements SolrInfoBean, Closeable {
    * Creates and initializes a RestManager based on configuration args in solrconfig.xml.
    * RestManager provides basic storage support for managed resource data, such as to
    * persist stopwords to ZooKeeper if running in SolrCloud mode.
+   * @param cd
    */
   @SuppressWarnings("unchecked")
-  protected RestManager initRestManager() throws SolrException {
+  protected RestManager initRestManager(CoreDescriptor cd) throws SolrException {
 
     PluginInfo restManagerPluginInfo =
         getSolrConfig().getPluginInfo(RestManager.class.getName());
@@ -3000,7 +3005,7 @@ public final class SolrCore implements SolrInfoBean, Closeable {
     if (initArgs == null)
       initArgs = new NamedList<>();
 
-    String collection = getCoreDescriptor().getCollectionName();
+    String collection = cd.getCollectionName();
     StorageIO storageIO =
         ManagedResourceStorage.newStorageIO(collection, resourceLoader, initArgs);
     mgr.init(resourceLoader, initArgs, storageIO);
@@ -3325,6 +3330,6 @@ public final class SolrCore implements SolrInfoBean, Closeable {
    * @param r the task to run
    */
   public void runAsync(Runnable r) {
-    ParWork.getExecutor().submit(r);
+    ParWork.getMyPerThreadExecutor().submit(r);
   }
 }
