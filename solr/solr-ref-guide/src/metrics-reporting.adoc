@@ -57,6 +57,12 @@ This registry is returned at `solr.jvm` and includes the following information. 
 * System properties such as Java information, various installation directory paths, ports, and similar information. You can control what appears here by modifying `solr.xml`.
 // TODO for 7.0 fix this
 
+=== Overseer Registry
+
+This registry is returned at `solr.overseer` when run in SolrCloud mode and includes the following information. When making requests with the <<Metrics API>>, you can specify `&group=overseer` to limit to only these metrics.
+
+* size of the Overseer queues (collection work queue and cluster state update queue)
+
 === Node / CoreContainer Registry
 
 This registry is returned at `solr.node` and includes the following information. When making requests with the <<Metrics API>>, you can specify `&group=node` to limit to only these metrics.
@@ -91,7 +97,7 @@ The metrics available in your system can be customized by modifying the `<metric
 
 TIP: See also the section <<format-of-solr-xml.adoc#format-of-solr-xml,Format of Solr.xml>> for more information about the `solr.xml` file, where to find it, and how to edit it.
 
-=== Disabling the metrics collection ===
+=== Disabling the Metrics Collection
 The `<metrics>` element in `solr.xml` supports one attribute `enabled`, which takes a boolean value,
 for example `<metrics enabled="true">`.
 
