@@ -46,9 +46,14 @@ public class Test02Boolean extends LuceneTestCase {
   SingleFieldTestDb db1;
 
   public void normalTest1(String query, int[] expdnrs) throws Exception {
+<<<<<<< HEAD
     BooleanQueryTst bqt =
         new BooleanQueryTst(
             query, expdnrs, db1, fieldName, this, new BasicQueryFactory(maxBasicQueries));
+=======
+    TestBooleanQuery bqt = new TestBooleanQuery( query, expdnrs, db1, fieldName, this,
+                                                new BasicQueryFactory(maxBasicQueries));
+>>>>>>> ae33c3f25e9... renaming the final tranche of classes to conform to convention.
     bqt.setVerbose(verbose);
     bqt.doTest();
   }

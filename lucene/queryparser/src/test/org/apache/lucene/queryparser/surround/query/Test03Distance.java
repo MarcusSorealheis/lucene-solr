@@ -41,7 +41,7 @@ public class Test03Distance extends LuceneTestCase {
   };
 
   public void test00Exceptions() throws Exception {
-    String m = ExceptionQueryTst.getFailQueries(exceptionQueries, verbose);
+    String m = TestExceptionQuery.getFailQueries(exceptionQueries, verbose);
     if (m.length() > 0) {
       fail("No ParseException for:\n" + m);
     }
@@ -68,9 +68,14 @@ public class Test03Distance extends LuceneTestCase {
   }
 
   private void distanceTst(String query, int[] expdnrs, SingleFieldTestDb db) throws Exception {
+<<<<<<< HEAD
     BooleanQueryTst bqt =
         new BooleanQueryTst(
             query, expdnrs, db, fieldName, this, new BasicQueryFactory(maxBasicQueries));
+=======
+    TestBooleanQuery bqt = new TestBooleanQuery( query, expdnrs, db, fieldName, this,
+                                                new BasicQueryFactory(maxBasicQueries));
+>>>>>>> ae33c3f25e9... renaming the final tranche of classes to conform to convention.
     bqt.setVerbose(verbose);
     bqt.doTest();
   }
